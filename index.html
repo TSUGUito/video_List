@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>動画サンプル一覧ツール</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --text: #1a1d24;
+    --sub: #6b7280;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --border: #e5e7eb;
+    --danger: #dc2626;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  header {
+    background: linear-gradient(135deg, #1e3a8a, #2563eb);
+    color: #fff;
+    padding: 28px 24px;
+  }
+  header h1 { font-size: 20px; font-weight: 700; }
+  header p { font-size: 13px; opacity: .85; margin-top: 4px; }
+  main { max-width: 1080px; margin: 0 auto; padding: 24px 20px 80px; }
+
+  .meta-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .meta-panel label { font-size: 12px; font-weight: 700; color: var(--sub); display: block; margin-bottom: 4px; }
+  .meta-panel input, .meta-panel textarea {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    margin-bottom: 14px;
+  }
+  .meta-panel textarea { resize: vertical; min-height: 60px; }
+  .logo-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .logo-btn {
+    border: 1px solid var(--border); background: #fff; border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; cursor: pointer; font-family: inherit;
+  }
+  .logo-btn:hover { background: #f3f4f6; }
+  .logo-note { font-size: 12px; color: var(--sub); }
+  #logoPreviewWrap {
+    display: inline-flex; align-items: center; background: #0a1128;
+    border-radius: 8px; padding: 6px 12px;
+  }
+  #logoPreview { max-height: 32px; max-width: 160px; display: block; }
+  .meta-panel input:focus, .meta-panel textarea:focus,
+  .card input:focus, .card textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  #dropzone {
+    border: 2px dashed #94a3b8;
+    border-radius: var(--radius);
+    background: #fff;
+    padding: 48px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .2s;
+    margin-bottom: 24px;
+  }
+  #dropzone.dragover { border-color: var(--accent); background: #eff6ff; }
+  #dropzone .dz-icon { font-size: 40px; }
+  #dropzone .dz-main { font-size: 16px; font-weight: 700; margin-top: 8px; }
+  #dropzone .dz-sub { font-size: 13px; color: var(--sub); margin-top: 4px; }
+
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 18px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .card video { width: 100%; aspect-ratio: 16/9; background: #000; display: block; }
+  .card-body { padding: 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .card input.title {
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 15px;
+    font-weight: 700;
+    font-family: inherit;
+    width: 100%;
+  }
+  .card input.title:hover { border-color: var(--border); }
+  .card textarea.desc {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 56px;
+    width: 100%;
+  }
+  .card .file-info { font-size: 11px; color: var(--sub); padding: 0 8px; }
+  .card-actions { display: flex; gap: 6px; padding: 0 14px 14px; }
+  .card-actions button {
+    border: 1px solid var(--border);
+    background: #fff;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .card-actions button:hover { background: #f3f4f6; }
+  .card-actions .del { color: var(--danger); margin-left: auto; }
+
+  .toolbar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: rgba(255,255,255,.95);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .toolbar .total { font-size: 12px; color: var(--sub); }
+  .btn {
+    border: none;
+    border-radius: 10px;
+    padding: 12px 22px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-secondary { background: #fff; color: var(--accent); border: 1.5px solid var(--accent); }
+  .btn-secondary:hover { background: #eff6ff; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  #status { font-size: 13px; color: var(--accent); font-weight: 700; }
+  .empty-note { text-align: center; color: var(--sub); font-size: 14px; padding: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 動画サンプル一覧ツール</h1>
+  <p>動画をドラッグ&ドロップで追加 → 説明を記入 → 書き出して共有</p>
+</header>
+
+<main>
+  <div class="meta-panel">
+    <label for="galleryTitle">一覧のタイトル</label>
+    <input id="galleryTitle" type="text" placeholder="例：〇〇案件 動画サンプル一覧" value="動画サンプル一覧">
+    <label for="galleryDesc">一覧の説明（任意）</label>
+    <textarea id="galleryDesc" placeholder="例：ご確認をお願いします。各動画の下にコメントを記載しています。"></textarea>
+    <label for="galleryAuthor">作成者</label>
+    <input id="galleryAuthor" type="text" placeholder="例：伊藤（株式会社TSUGU）">
+    <label>ロゴ画像（書き出しHTMLの右上に表示・白抜きPNG推奨）</label>
+    <div class="logo-row">
+      <button type="button" id="logoPick" class="logo-btn">画像を選択</button>
+      <input type="file" id="logoInput" accept="image/*" hidden>
+      <span id="logoPreviewWrap" style="display:none"><img id="logoPreview" alt="ロゴプレビュー"></span>
+      <button type="button" id="logoClear" class="logo-btn" style="display:none">ロゴを削除</button>
+      <span id="logoNote" class="logo-note">未設定（設定すると次回以降も記憶されます）</span>
+    </div>
+  </div>
+
+  <div id="dropzone">
+    <div class="dz-icon">📥</div>
+    <div class="dz-main">ここに動画ファイルをドラッグ&ドロップ</div>
+    <div class="dz-sub">またはクリックしてファイルを選択（MP4 / MOV / WebM など・複数可）</div>
+    <input type="file" id="fileInput" accept="video/*" multiple hidden>
+  </div>
+
+  <div id="grid"></div>
+  <div class="empty-note" id="emptyNote">まだ動画がありません。上のエリアから追加してください。</div>
+</main>
+
+<div class="toolbar">
+  <span class="total" id="totalInfo">動画：0本 / 合計：0 MB</span>
+  <button class="btn btn-primary" id="exportHtml" disabled>📄 HTMLで書き出し（1ファイル・共有用）</button>
+  <button class="btn btn-secondary" id="exportZip" disabled>🗜 ZIPで書き出し（大容量向け）</button>
+  <span id="status"></span>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var items = []; // {id, file, url, title, desc}
+  var seq = 0;
+
+  var dropzone = document.getElementById('dropzone');
+  var fileInput = document.getElementById('fileInput');
+  var grid = document.getElementById('grid');
+  var emptyNote = document.getElementById('emptyNote');
+  var totalInfo = document.getElementById('totalInfo');
+  var btnHtml = document.getElementById('exportHtml');
+  var btnZip = document.getElementById('exportZip');
+  var statusEl = document.getElementById('status');
+
+  // ---- ロゴ・作成者（localStorageに記憶） ----
+  var logoDataUrl = '';
+  var logoPick = document.getElementById('logoPick');
+  var logoInput = document.getElementById('logoInput');
+  var logoClear = document.getElementById('logoClear');
+  var logoPreview = document.getElementById('logoPreview');
+  var logoPreviewWrap = document.getElementById('logoPreviewWrap');
+  var logoNote = document.getElementById('logoNote');
+  var authorInput = document.getElementById('galleryAuthor');
+
+  function store(key, val) {
+    try {
+      if (val) { localStorage.setItem(key, val); } else { localStorage.removeItem(key); }
+    } catch (e) { /* file:// 環境等で使えない場合は記憶なしで続行 */ }
+  }
+  function load(key) {
+    try { return localStorage.getItem(key) || ''; } catch (e) { return ''; }
+  }
+
+  function setLogo(dataUrl) {
+    logoDataUrl = dataUrl || '';
+    if (logoDataUrl) {
+      logoPreview.src = logoDataUrl;
+      logoPreviewWrap.style.display = 'inline-flex';
+      logoClear.style.display = 'inline-block';
+      logoNote.textContent = '設定済み（書き出しHTMLの右上に表示されます）';
+    } else {
+      logoPreviewWrap.style.display = 'none';
+      logoClear.style.display = 'none';
+      logoNote.textContent = '未設定（設定すると次回以降も記憶されます）';
+    }
+    store('vgt_logo', logoDataUrl);
+  }
+
+  logoPick.addEventListener('click', function () { logoInput.click(); });
+  logoInput.addEventListener('change', function () {
+    var f = logoInput.files[0];
+    logoInput.value = '';
+    if (!f) return;
+    if (f.size > 2 * 1048576) { alert('ロゴ画像は2MB以下にしてください。'); return; }
+    readAsDataURL(f).then(setLogo).catch(function () { alert('ロゴの読み込みに失敗しました。'); });
+  });
+  logoClear.addEventListener('click', function () { setLogo(''); });
+
+  authorInput.addEventListener('input', function () { store('vgt_author', authorInput.value); });
+
+  // 前回の設定を復元
+  setLogo(load('vgt_logo'));
+  var savedAuthor = load('vgt_author');
+  if (savedAuthor) authorInput.value = savedAuthor;
+
+  // ---- ファイル追加 ----
+  dropzone.addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () {
+    addFiles(fileInput.files);
+    fileInput.value = '';
+  });
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    dropzone.addEventListener(ev, function (e) {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    dropzone.addEventListener(ev, function (e) {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+    });
+  });
+  dropzone.addEventListener('drop', function (e) {
+    addFiles(e.dataTransfer.files);
+  });
+
+  function addFiles(fileList) {
+    var added = 0;
+    Array.prototype.forEach.call(fileList, function (f) {
+      if (!f.type.startsWith('video/')) return;
+      items.push({
+        id: ++seq,
+        file: f,
+        url: URL.createObjectURL(f),
+        title: f.name.replace(/\.[^.]+$/, ''),
+        desc: ''
+      });
+      added++;
+    });
+    if (added === 0 && fileList.length > 0) {
+      alert('動画ファイルのみ追加できます。');
+    }
+    render();
+  }
+
+  function fmtSize(bytes) {
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+    return Math.max(1, Math.round(bytes / 1024)) + ' KB';
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ---- 一覧描画 ----
+  function render() {
+    grid.innerHTML = '';
+    items.forEach(function (item, idx) {
+      var card = document.createElement('div');
+      card.className = 'card';
+
+      var video = document.createElement('video');
+      video.src = item.url;
+      video.controls = true;
+      video.preload = 'metadata';
+      card.appendChild(video);
+
+      var body = document.createElement('div');
+      body.className = 'card-body';
+
+      var title = document.createElement('input');
+      title.className = 'title';
+      title.value = item.title;
+      title.placeholder = 'タイトル';
+      title.addEventListener('input', function () { item.title = title.value; });
+      body.appendChild(title);
+
+      var desc = document.createElement('textarea');
+      desc.className = 'desc';
+      desc.value = item.desc;
+      desc.placeholder = '説明・コメントを入力（例：Aパターン。テロップ強めです）';
+      desc.addEventListener('input', function () { item.desc = desc.value; });
+      body.appendChild(desc);
+
+      var info = document.createElement('div');
+      info.className = 'file-info';
+      info.textContent = item.file.name + '（' + fmtSize(item.file.size) + '）';
+      body.appendChild(info);
+
+      card.appendChild(body);
+
+      var actions = document.createElement('div');
+      actions.className = 'card-actions';
+
+      var up = document.createElement('button');
+      up.textContent = '↑';
+      up.title = '上に移動';
+      up.disabled = idx === 0;
+      up.addEventListener('click', function () {
+        items.splice(idx - 1, 0, items.splice(idx, 1)[0]);
+        render();
+      });
+      actions.appendChild(up);
+
+      var down = document.createElement('button');
+      down.textContent = '↓';
+      down.title = '下に移動';
+      down.disabled = idx === items.length - 1;
+      down.addEventListener('click', function () {
+        items.splice(idx + 1, 0, items.splice(idx, 1)[0]);
+        render();
+      });
+      actions.appendChild(down);
+
+      var del = document.createElement('button');
+      del.className = 'del';
+      del.textContent = '削除';
+      del.addEventListener('click', function () {
+        URL.revokeObjectURL(item.url);
+        items.splice(idx, 1);
+        render();
+      });
+      actions.appendChild(del);
+
+      card.appendChild(actions);
+      grid.appendChild(card);
+    });
+
+    var total = items.reduce(function (s, i) { return s + i.file.size; }, 0);
+    totalInfo.textContent = '動画：' + items.length + '本 / 合計：' + fmtSize(total);
+    emptyNote.style.display = items.length ? 'none' : 'block';
+    btnHtml.disabled = items.length === 0;
+    btnZip.disabled = items.length === 0;
+  }
+
+  // ---- 書き出し共通：閲覧用HTML生成 ----
+  function buildViewerHtml(sources) {
+    // sources: [{src, title, desc, sizeLabel}]
+    var gTitle = document.getElementById('galleryTitle').value || '動画サンプル一覧';
+    var gDesc = document.getElementById('galleryDesc').value;
+    var gAuthor = authorInput.value;
+    var today = new Date();
+    var dateStr = today.getFullYear() + '/' + (today.getMonth() + 1) + '/' + today.getDate();
+
+    var cards = sources.map(function (s) {
+      return '<div class="card">' +
+        '<video src="' + s.src + '" controls preload="metadata"></video>' +
+        '<div class="body"><h2>' + esc(s.title) + '</h2>' +
+        (s.desc ? '<p class="desc">' + esc(s.desc).replace(/\n/g, '<br>') + '</p>' : '') +
+        '<p class="size">' + esc(s.sizeLabel) + '</p></div></div>';
+    }).join('\n');
+
+    return '<!DOCTYPE html>\n<html lang="ja">\n<head>\n<meta charset="UTF-8">\n' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n' +
+      '<title>' + esc(gTitle) + '</title>\n<style>\n' +
+      'body{font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;background:linear-gradient(160deg,#05070f 0%,#0a1128 45%,#101c3f 100%);background-attachment:fixed;color:#e8eaf2;margin:0;min-height:100vh;line-height:1.6}\n' +
+      'header{padding:40px 24px 8px;max-width:1080px;margin:0 auto;display:flex;justify-content:space-between;align-items:flex-start;gap:20px}\n' +
+      'header .h-left{min-width:0}\n' +
+      'header h1{margin:0;font-size:24px;color:#fff;letter-spacing:.02em}\n' +
+      'header h1::after{content:"";display:block;width:48px;height:3px;margin-top:10px;border-radius:2px;background:linear-gradient(90deg,#3b82f6,#8b5cf6)}\n' +
+      'header p{margin:14px 0 0;font-size:14px;color:#aab2c8;white-space:pre-wrap}\n' +
+      'header .meta{font-size:12px;color:#5f6885;margin-top:8px}\n' +
+      'header .logo{max-height:44px;max-width:220px;flex-shrink:0;margin-top:4px}\n' +
+      '@media(max-width:600px){header{flex-direction:column-reverse}header .logo{max-height:32px}}\n' +
+      'main{max-width:1080px;margin:0 auto;padding:24px 20px 60px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px}\n' +
+      '.card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:14px;overflow:hidden;backdrop-filter:blur(6px);box-shadow:0 8px 24px rgba(0,0,0,.35);transition:transform .2s,border-color .2s}\n' +
+      '.card:hover{transform:translateY(-3px);border-color:rgba(99,140,255,.45)}\n' +
+      '.card video{width:100%;aspect-ratio:16/9;background:#000;display:block}\n' +
+      '.card .body{padding:16px}.card h2{margin:0;font-size:16px;color:#fff}\n' +
+      '.card .desc{margin:8px 0 0;font-size:13px;color:#b6bdd1;white-space:pre-wrap}\n' +
+      '.card .size{margin:10px 0 0;font-size:11px;color:#5f6885}\n' +
+      '</style>\n</head>\n<body>\n<header><div class="h-left"><h1>' + esc(gTitle) + '</h1>' +
+      (gDesc ? '<p>' + esc(gDesc) + '</p>' : '') +
+      '<p class="meta">' + (gAuthor ? '作成者：' + esc(gAuthor) + '　' : '') + '作成日：' + dateStr + '</p></div>' +
+      (logoDataUrl ? '<img class="logo" src="' + logoDataUrl + '" alt="logo">' : '') +
+      '</header>\n<main>\n' +
+      cards + '\n</main>\n</body>\n</html>';
+  }
+
+  function download(blob, filename) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 10000);
+  }
+
+  function readAsDataURL(file) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(r.result); };
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  function setBusy(busy, msg) {
+    btnHtml.disabled = busy || items.length === 0;
+    btnZip.disabled = busy || items.length === 0;
+    statusEl.textContent = msg || '';
+  }
+
+  function exportName(ext) {
+    var t = (document.getElementById('galleryTitle').value || 'video-list')
+      .replace(/[\\/:*?"<>|]/g, '_').trim();
+    return t + ext;
+  }
+
+  // ---- HTML書き出し（動画埋め込み） ----
+  btnHtml.addEventListener('click', function () {
+    var total = items.reduce(function (s, i) { return s + i.file.size; }, 0);
+    if (total > 150 * 1048576) {
+      if (!confirm('合計 ' + fmtSize(total) + ' あります。埋め込みHTMLは非常に重くなり、開けない場合があります。\n「ZIPで書き出し」がおすすめですが、このまま続けますか？')) return;
+    }
+    setBusy(true, '書き出し中…（動画を変換しています）');
+    var done = 0;
+    Promise.all(items.map(function (item) {
+      return readAsDataURL(item.file).then(function (dataUrl) {
+        done++;
+        statusEl.textContent = '書き出し中… ' + done + '/' + items.length;
+        return { src: dataUrl, title: item.title, desc: item.desc, sizeLabel: fmtSize(item.file.size) };
+      });
+    })).then(function (sources) {
+      var html = buildViewerHtml(sources);
+      download(new Blob([html], { type: 'text/html' }), exportName('.html'));
+      setBusy(false, '✅ 書き出し完了！このファイルを共有してください');
+      setTimeout(function () { statusEl.textContent = ''; }, 6000);
+    }).catch(function (err) {
+      setBusy(false, '');
+      alert('書き出しに失敗しました：' + err);
+    });
+  });
+
+  // ---- ZIP書き出し（HTML + 動画フォルダ） ----
+  btnZip.addEventListener('click', function () {
+    if (typeof JSZip === 'undefined') {
+      alert('ZIP機能の読み込みに失敗しました。インターネット接続を確認して、ページを再読み込みしてください。');
+      return;
+    }
+    setBusy(true, 'ZIP作成中…');
+    var zip = new JSZip();
+    var folder = zip.folder('videos');
+    var used = {};
+    var sources = items.map(function (item, i) {
+      var ext = (item.file.name.match(/\.[^.]+$/) || ['.mp4'])[0];
+      var base = 'video_' + String(i + 1).padStart(2, '0');
+      var fname = base + ext;
+      while (used[fname]) { fname = base + '_' + Math.random().toString(36).slice(2, 5) + ext; }
+      used[fname] = true;
+      folder.file(fname, item.file);
+      return { src: 'videos/' + fname, title: item.title, desc: item.desc, sizeLabel: fmtSize(item.file.size) };
+    });
+    zip.file('index.html', buildViewerHtml(sources));
+    zip.file('README.txt', 'このZIPを解凍して、index.html をダブルクリックで開いてください。\nvideos フォルダと index.html は同じ場所に置いたままにしてください。');
+    zip.generateAsync({ type: 'blob' }, function (meta) {
+      statusEl.textContent = 'ZIP作成中… ' + Math.round(meta.percent) + '%';
+    }).then(function (blob) {
+      download(blob, exportName('.zip'));
+      setBusy(false, '✅ ZIP書き出し完了！解凍後 index.html を開くよう伝えてください');
+      setTimeout(function () { statusEl.textContent = ''; }, 8000);
+    }).catch(function (err) {
+      setBusy(false, '');
+      alert('ZIP作成に失敗しました：' + err);
+    });
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
