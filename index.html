@@ -58,6 +58,16 @@
   }
   .logo-btn:hover { background: #f3f4f6; }
   .logo-note { font-size: 12px; color: var(--sub); }
+  .proj-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .proj-row:last-child { margin-bottom: 0; }
+  .proj-row select {
+    flex: 1; min-width: 220px; border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 13px; font-family: inherit; background: #fff;
+  }
+  .proj-save { background: var(--accent) !important; color: #fff; border-color: var(--accent) !important; }
+  .proj-save:hover { background: var(--accent-hover) !important; }
+  #projStatus { font-size: 12px; color: var(--sub); }
+  #projStatus.current { color: var(--accent); font-weight: 700; }
   #logoPreviewWrap {
     display: inline-flex; align-items: center; background: #0a1128;
     border-radius: 8px; padding: 6px 12px;
@@ -169,6 +179,21 @@
 </header>
 
 <main>
+  <div class="meta-panel">
+    <label>保存済みの一覧（このブラウザ内に記録されます）</label>
+    <div class="proj-row">
+      <select id="projectSelect"><option value="">― 保存済みの一覧を選択 ―</option></select>
+      <button type="button" id="projOpen" class="logo-btn">開く</button>
+      <button type="button" id="projDelete" class="logo-btn" style="color:var(--danger)">削除</button>
+    </div>
+    <div class="proj-row">
+      <button type="button" id="projSave" class="logo-btn proj-save">💾 保存（上書き）</button>
+      <button type="button" id="projSaveNew" class="logo-btn">＋ 新規として保存</button>
+      <button type="button" id="projNew" class="logo-btn">📄 新しい一覧を作る</button>
+      <span id="projStatus">未保存の新規一覧を編集中</span>
+    </div>
+  </div>
+
   <div class="meta-panel">
     <label for="galleryTitle">一覧のタイトル</label>
     <input id="galleryTitle" type="text" placeholder="例：〇〇案件 動画サンプル一覧" value="動画サンプル一覧">
@@ -299,6 +324,7 @@
       items.push({
         id: ++seq,
         file: f,
+        name: f.name,
         url: URL.createObjectURL(f),
         title: f.name.replace(/\.[^.]+$/, ''),
         desc: ''
@@ -353,7 +379,7 @@
 
       var info = document.createElement('div');
       info.className = 'file-info';
-      info.textContent = item.file.name + '（' + fmtSize(item.file.size) + '）';
+      info.textContent = item.name + '（' + fmtSize(item.file.size) + '）';
       body.appendChild(info);
 
       card.appendChild(body);
@@ -493,8 +519,8 @@
       });
     })).then(function (sources) {
       var html = buildViewerHtml(sources);
-      download(new Blob([html], { type: 'text/html' }), exportName('.html'));
-      setBusy(false, '✅ 書き出し完了！このファイルを共有してください');
+      download(new Blob([html], { type: 'text/html' }), 'index.html');
+      setBusy(false, '✅ index.html を書き出しました！GitHub等にそのままアップできます');
       setTimeout(function () { statusEl.textContent = ''; }, 6000);
     }).catch(function (err) {
       setBusy(false, '');
@@ -513,7 +539,7 @@
     var folder = zip.folder('videos');
     var used = {};
     var sources = items.map(function (item, i) {
-      var ext = (item.file.name.match(/\.[^.]+$/) || ['.mp4'])[0];
+      var ext = (item.name.match(/\.[^.]+$/) || ['.mp4'])[0];
       var base = 'video_' + String(i + 1).padStart(2, '0');
       var fname = base + ext;
       while (used[fname]) { fname = base + '_' + Math.random().toString(36).slice(2, 5) + ext; }
@@ -535,6 +561,156 @@
     });
   });
 
+  // ---- 複数プロジェクト保存（IndexedDB） ----
+  var currentProjectId = null;
+  var projectSelect = document.getElementById('projectSelect');
+  var projStatus = document.getElementById('projStatus');
+  var titleInput = document.getElementById('galleryTitle');
+  var descInput = document.getElementById('galleryDesc');
+
+  function openDb() {
+    return new Promise(function (resolve, reject) {
+      if (!window.indexedDB) { reject(new Error('このブラウザでは保存機能が使えません')); return; }
+      var req = indexedDB.open('vgt_db', 1);
+      req.onupgradeneeded = function () {
+        req.result.createObjectStore('projects', { keyPath: 'id', autoIncrement: true });
+      };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  function idbRequest(req) {
+    return new Promise(function (resolve, reject) {
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  function setProjStatus(msg, isCurrent) {
+    projStatus.textContent = msg;
+    projStatus.className = isCurrent ? 'current' : '';
+  }
+
+  function refreshProjectList() {
+    return openDb().then(function (db) {
+      var tx = db.transaction('projects', 'readonly');
+      return idbRequest(tx.objectStore('projects').getAll()).then(function (all) {
+        db.close();
+        all.sort(function (a, b) { return b.updatedAt - a.updatedAt; });
+        projectSelect.innerHTML = '<option value="">― 保存済みの一覧を選択 ―</option>';
+        all.forEach(function (p) {
+          var opt = document.createElement('option');
+          opt.value = p.id;
+          var d = new Date(p.updatedAt);
+          opt.textContent = p.name + '（' + p.items.length + '本 / 更新 ' +
+            d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate() + '）';
+          if (p.id === currentProjectId) opt.selected = true;
+          projectSelect.appendChild(opt);
+        });
+      });
+    }).catch(function (e) {
+      setProjStatus('保存機能が使えません：' + e.message, false);
+    });
+  }
+
+  function saveProject(asNew) {
+    if (items.length === 0 && !confirm('動画が0本ですが保存しますか？')) return;
+    var name = titleInput.value.trim() || '無題の一覧';
+    var data = {
+      name: name,
+      title: titleInput.value,
+      desc: descInput.value,
+      author: authorInput.value,
+      updatedAt: Date.now(),
+      items: items.map(function (it) {
+        return { title: it.title, desc: it.desc, name: it.name, blob: it.file };
+      })
+    };
+    if (!asNew && currentProjectId !== null) data.id = currentProjectId;
+    setProjStatus('保存中…', false);
+    openDb().then(function (db) {
+      var tx = db.transaction('projects', 'readwrite');
+      return idbRequest(tx.objectStore('projects').put(data)).then(function (id) {
+        db.close();
+        currentProjectId = id;
+        setProjStatus('✅ 保存しました：' + name, true);
+        return refreshProjectList();
+      });
+    }).catch(function (e) {
+      setProjStatus('保存に失敗しました：' + e.message, false);
+      alert('保存に失敗しました。ブラウザの空き容量不足の可能性があります。\n' + e.message);
+    });
+  }
+
+  function loadProject(id) {
+    openDb().then(function (db) {
+      var tx = db.transaction('projects', 'readonly');
+      return idbRequest(tx.objectStore('projects').get(id)).then(function (p) {
+        db.close();
+        if (!p) { alert('データが見つかりませんでした。'); return; }
+        items.forEach(function (it) { URL.revokeObjectURL(it.url); });
+        items = p.items.map(function (it) {
+          return {
+            id: ++seq,
+            file: it.blob,
+            name: it.name,
+            url: URL.createObjectURL(it.blob),
+            title: it.title,
+            desc: it.desc
+          };
+        });
+        titleInput.value = p.title || '';
+        descInput.value = p.desc || '';
+        if (p.author) authorInput.value = p.author;
+        currentProjectId = p.id;
+        setProjStatus('編集中：' + p.name, true);
+        render();
+      });
+    }).catch(function (e) {
+      alert('読み込みに失敗しました：' + e.message);
+    });
+  }
+
+  document.getElementById('projSave').addEventListener('click', function () { saveProject(false); });
+  document.getElementById('projSaveNew').addEventListener('click', function () { saveProject(true); });
+
+  document.getElementById('projOpen').addEventListener('click', function () {
+    var id = Number(projectSelect.value);
+    if (!id) { alert('開く一覧を選択してください。'); return; }
+    if (items.length > 0 && !confirm('現在編集中の内容は破棄されます（保存していない場合）。開きますか？')) return;
+    loadProject(id);
+  });
+
+  document.getElementById('projDelete').addEventListener('click', function () {
+    var id = Number(projectSelect.value);
+    if (!id) { alert('削除する一覧を選択してください。'); return; }
+    var label = projectSelect.options[projectSelect.selectedIndex].textContent;
+    if (!confirm('「' + label + '」を削除します。元に戻せません。よろしいですか？')) return;
+    openDb().then(function (db) {
+      var tx = db.transaction('projects', 'readwrite');
+      return idbRequest(tx.objectStore('projects').delete(id)).then(function () {
+        db.close();
+        if (id === currentProjectId) currentProjectId = null;
+        setProjStatus('削除しました', false);
+        return refreshProjectList();
+      });
+    }).catch(function (e) { alert('削除に失敗しました：' + e.message); });
+  });
+
+  document.getElementById('projNew').addEventListener('click', function () {
+    if (items.length > 0 && !confirm('現在編集中の内容をクリアして新しい一覧を作ります。よろしいですか？（保存済みデータは残ります）')) return;
+    items.forEach(function (it) { URL.revokeObjectURL(it.url); });
+    items = [];
+    currentProjectId = null;
+    titleInput.value = '動画サンプル一覧';
+    descInput.value = '';
+    projectSelect.value = '';
+    setProjStatus('未保存の新規一覧を編集中', false);
+    render();
+  });
+
+  refreshProjectList();
   render();
 })();
 </script>
