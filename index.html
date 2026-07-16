@@ -192,6 +192,11 @@
       <button type="button" id="projNew" class="logo-btn">📄 新しい一覧を作る</button>
       <span id="projStatus">未保存の新規一覧を編集中</span>
     </div>
+    <div class="proj-row">
+      <button type="button" id="projExport" class="logo-btn">📤 バックアップ書き出し（他ブラウザ・別PC用）</button>
+      <button type="button" id="projImport" class="logo-btn">📥 バックアップ読み込み</button>
+      <input type="file" id="projImportInput" accept=".zip" hidden>
+    </div>
   </div>
 
   <div class="meta-panel">
@@ -708,6 +713,109 @@
     projectSelect.value = '';
     setProjStatus('未保存の新規一覧を編集中', false);
     render();
+  });
+
+  // ---- バックアップ書き出し・読み込み（他ブラウザ/別PC用） ----
+  function mimeFromExt(ext) {
+    var map = {
+      '.mp4': 'video/mp4', '.m4v': 'video/x-m4v', '.mov': 'video/quicktime',
+      '.webm': 'video/webm', '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska'
+    };
+    return map[ext.toLowerCase()] || 'video/mp4';
+  }
+
+  document.getElementById('projExport').addEventListener('click', function () {
+    if (typeof JSZip === 'undefined') {
+      alert('ZIP機能の読み込みに失敗しました。インターネット接続を確認して、ページを再読み込みしてください。');
+      return;
+    }
+    if (items.length === 0) { alert('書き出す動画がありません。'); return; }
+    setBusy(true, 'バックアップ作成中…');
+    var zip = new JSZip();
+    var folder = zip.folder('videos');
+    var meta = {
+      version: 1,
+      app: 'video-gallery-tool',
+      title: titleInput.value,
+      desc: descInput.value,
+      author: authorInput.value,
+      savedAt: Date.now(),
+      items: []
+    };
+    items.forEach(function (it, i) {
+      var ext = (it.name.match(/\.[^.]+$/) || ['.mp4'])[0];
+      var fname = 'v' + String(i + 1).padStart(3, '0') + ext;
+      folder.file(fname, it.file);
+      meta.items.push({ title: it.title, desc: it.desc, name: it.name, path: 'videos/' + fname });
+    });
+    zip.file('project.json', JSON.stringify(meta, null, 2));
+    zip.file('README.txt', 'このZIPは「動画サンプル一覧ツール」のバックアップです。\nツールの「バックアップ読み込み」からこのZIPを選ぶと復元できます。\n（解凍は不要です）');
+    zip.generateAsync({ type: 'blob' }, function (m) {
+      statusEl.textContent = 'バックアップ作成中… ' + Math.round(m.percent) + '%';
+    }).then(function (blob) {
+      var t = (titleInput.value || 'video-list').replace(/[\\/:*?"<>|]/g, '_').trim();
+      download(blob, t + '_backup.zip');
+      setBusy(false, '✅ バックアップを書き出しました');
+      setTimeout(function () { statusEl.textContent = ''; }, 6000);
+    }).catch(function (err) {
+      setBusy(false, '');
+      alert('バックアップ作成に失敗しました：' + err);
+    });
+  });
+
+  document.getElementById('projImport').addEventListener('click', function () {
+    document.getElementById('projImportInput').click();
+  });
+
+  document.getElementById('projImportInput').addEventListener('change', function () {
+    var input = document.getElementById('projImportInput');
+    var f = input.files[0];
+    input.value = '';
+    if (!f) return;
+    if (typeof JSZip === 'undefined') {
+      alert('ZIP機能の読み込みに失敗しました。インターネット接続を確認して、ページを再読み込みしてください。');
+      return;
+    }
+    if (items.length > 0 && !confirm('現在編集中の内容は破棄されます（保存していない場合）。読み込みますか？')) return;
+    setBusy(true, 'バックアップ読み込み中…');
+    JSZip.loadAsync(f).then(function (zip) {
+      var pj = zip.file('project.json');
+      if (!pj) throw new Error('このZIPはツールのバックアップファイルではありません（project.jsonがありません）');
+      return pj.async('string').then(function (str) {
+        var meta = JSON.parse(str);
+        return Promise.all(meta.items.map(function (mi) {
+          var zf = zip.file(mi.path);
+          if (!zf) throw new Error('動画データが見つかりません：' + mi.path);
+          return zf.async('blob').then(function (raw) {
+            var ext = (mi.name.match(/\.[^.]+$/) || ['.mp4'])[0];
+            var blob = new Blob([raw], { type: mimeFromExt(ext) });
+            return { title: mi.title, desc: mi.desc, name: mi.name, blob: blob };
+          });
+        })).then(function (loaded) {
+          items.forEach(function (it) { URL.revokeObjectURL(it.url); });
+          items = loaded.map(function (it) {
+            return {
+              id: ++seq,
+              file: it.blob,
+              name: it.name,
+              url: URL.createObjectURL(it.blob),
+              title: it.title,
+              desc: it.desc
+            };
+          });
+          titleInput.value = meta.title || '';
+          descInput.value = meta.desc || '';
+          if (meta.author) authorInput.value = meta.author;
+          currentProjectId = null;
+          setProjStatus('📥 読み込みました（未保存）。「保存」で記録できます', true);
+          render();
+          setBusy(false, '');
+        });
+      });
+    }).catch(function (err) {
+      setBusy(false, '');
+      alert('読み込みに失敗しました：' + (err.message || err));
+    });
   });
 
   refreshProjectList();
