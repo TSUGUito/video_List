@@ -568,6 +568,7 @@
 
   // ---- 複数プロジェクト保存（IndexedDB） ----
   var currentProjectId = null;
+  var currentProjectName = '';
   var projectSelect = document.getElementById('projectSelect');
   var projStatus = document.getElementById('projStatus');
   var titleInput = document.getElementById('galleryTitle');
@@ -622,6 +623,16 @@
   function saveProject(asNew) {
     if (items.length === 0 && !confirm('動画が0本ですが保存しますか？')) return;
     var name = titleInput.value.trim() || '無題の一覧';
+    // 安全装置：開いている記録とタイトルが変わっている場合、上書きか新規かを確認
+    if (!asNew && currentProjectId !== null && name !== currentProjectName) {
+      if (confirm('タイトルが「' + currentProjectName + '」から「' + name + '」に変わっています。\n\n新しい記録として保存しますか？\nOK：新規として保存（既存「' + currentProjectName + '」はそのまま残ります）\nキャンセル：既存「' + currentProjectName + '」を上書き')) {
+        asNew = true;
+      }
+    }
+    // 上書き時の最終確認
+    if (!asNew && currentProjectId !== null) {
+      if (!confirm('保存済みの「' + currentProjectName + '」を上書きします。よろしいですか？')) return;
+    }
     var data = {
       name: name,
       title: titleInput.value,
@@ -638,8 +649,10 @@
       var tx = db.transaction('projects', 'readwrite');
       return idbRequest(tx.objectStore('projects').put(data)).then(function (id) {
         db.close();
+        var isNewRecord = (id !== currentProjectId);
         currentProjectId = id;
-        setProjStatus('✅ 保存しました：' + name, true);
+        currentProjectName = name;
+        setProjStatus(isNewRecord ? '✅ 新しい記録として保存しました：' + name : '✅ 上書き保存しました：' + name, true);
         return refreshProjectList();
       });
     }).catch(function (e) {
@@ -669,6 +682,7 @@
         descInput.value = p.desc || '';
         if (p.author) authorInput.value = p.author;
         currentProjectId = p.id;
+        currentProjectName = p.name;
         setProjStatus('編集中：' + p.name, true);
         render();
       });
@@ -708,6 +722,7 @@
     items.forEach(function (it) { URL.revokeObjectURL(it.url); });
     items = [];
     currentProjectId = null;
+    currentProjectName = '';
     titleInput.value = '動画サンプル一覧';
     descInput.value = '';
     projectSelect.value = '';
@@ -807,6 +822,7 @@
           descInput.value = meta.desc || '';
           if (meta.author) authorInput.value = meta.author;
           currentProjectId = null;
+          currentProjectName = '';
           setProjStatus('📥 読み込みました（未保存）。「保存」で記録できます', true);
           render();
           setBusy(false, '');
