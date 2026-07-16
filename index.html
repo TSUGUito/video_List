@@ -237,8 +237,9 @@
 <script>
 (function () {
   'use strict';
-  var items = []; // {id, file, url, title, desc}
+  var items = []; // {id, file, name, url, title, desc}
   var seq = 0;
+  var dirty = false; // 未保存の編集があるか
 
   var dropzone = document.getElementById('dropzone');
   var fileInput = document.getElementById('fileInput');
@@ -339,6 +340,7 @@
     if (added === 0 && fileList.length > 0) {
       alert('動画ファイルのみ追加できます。');
     }
+    if (added > 0) dirty = true;
     render();
   }
 
@@ -372,14 +374,14 @@
       title.className = 'title';
       title.value = item.title;
       title.placeholder = 'タイトル';
-      title.addEventListener('input', function () { item.title = title.value; });
+      title.addEventListener('input', function () { item.title = title.value; dirty = true; });
       body.appendChild(title);
 
       var desc = document.createElement('textarea');
       desc.className = 'desc';
       desc.value = item.desc;
       desc.placeholder = '説明・コメントを入力（例：Aパターン。テロップ強めです）';
-      desc.addEventListener('input', function () { item.desc = desc.value; });
+      desc.addEventListener('input', function () { item.desc = desc.value; dirty = true; });
       body.appendChild(desc);
 
       var info = document.createElement('div');
@@ -398,6 +400,7 @@
       up.disabled = idx === 0;
       up.addEventListener('click', function () {
         items.splice(idx - 1, 0, items.splice(idx, 1)[0]);
+        dirty = true;
         render();
       });
       actions.appendChild(up);
@@ -408,6 +411,7 @@
       down.disabled = idx === items.length - 1;
       down.addEventListener('click', function () {
         items.splice(idx + 1, 0, items.splice(idx, 1)[0]);
+        dirty = true;
         render();
       });
       actions.appendChild(down);
@@ -418,6 +422,7 @@
       del.addEventListener('click', function () {
         URL.revokeObjectURL(item.url);
         items.splice(idx, 1);
+        dirty = true;
         render();
       });
       actions.appendChild(del);
@@ -652,6 +657,7 @@
         var isNewRecord = (id !== currentProjectId);
         currentProjectId = id;
         currentProjectName = name;
+        dirty = false;
         setProjStatus(isNewRecord ? '✅ 新しい記録として保存しました：' + name : '✅ 上書き保存しました：' + name, true);
         return refreshProjectList();
       });
@@ -683,6 +689,7 @@
         if (p.author) authorInput.value = p.author;
         currentProjectId = p.id;
         currentProjectName = p.name;
+        dirty = false;
         setProjStatus('編集中：' + p.name, true);
         render();
       });
@@ -694,11 +701,28 @@
   document.getElementById('projSave').addEventListener('click', function () { saveProject(false); });
   document.getElementById('projSaveNew').addEventListener('click', function () { saveProject(true); });
 
-  document.getElementById('projOpen').addEventListener('click', function () {
+  // タイトル・説明・作成者の変更も未保存扱いにする
+  [titleInput, descInput, authorInput].forEach(function (el) {
+    el.addEventListener('input', function () { dirty = true; });
+  });
+
+  // 選択したら自動で開く（未保存の編集がある場合のみ警告）
+  function tryOpenSelected() {
     var id = Number(projectSelect.value);
-    if (!id) { alert('開く一覧を選択してください。'); return; }
-    if (items.length > 0 && !confirm('現在編集中の内容は破棄されます（保存していない場合）。開きますか？')) return;
+    if (!id) return;
+    if (id === currentProjectId && !dirty) return; // すでに開いている
+    if (dirty) {
+      if (!confirm('保存していない編集内容があります。破棄して選択した一覧を開きますか？\n（残す場合はキャンセルして「保存」してください）')) {
+        projectSelect.value = currentProjectId || '';
+        return;
+      }
+    }
     loadProject(id);
+  }
+  projectSelect.addEventListener('change', tryOpenSelected);
+  document.getElementById('projOpen').addEventListener('click', function () {
+    if (!Number(projectSelect.value)) { alert('開く一覧を選択してください。'); return; }
+    tryOpenSelected();
   });
 
   document.getElementById('projDelete').addEventListener('click', function () {
@@ -718,11 +742,12 @@
   });
 
   document.getElementById('projNew').addEventListener('click', function () {
-    if (items.length > 0 && !confirm('現在編集中の内容をクリアして新しい一覧を作ります。よろしいですか？（保存済みデータは残ります）')) return;
+    if (dirty && !confirm('保存していない編集内容があります。破棄して新しい一覧を作りますか？（保存済みデータは残ります）')) return;
     items.forEach(function (it) { URL.revokeObjectURL(it.url); });
     items = [];
     currentProjectId = null;
     currentProjectName = '';
+    dirty = false;
     titleInput.value = '動画サンプル一覧';
     descInput.value = '';
     projectSelect.value = '';
@@ -791,7 +816,7 @@
       alert('ZIP機能の読み込みに失敗しました。インターネット接続を確認して、ページを再読み込みしてください。');
       return;
     }
-    if (items.length > 0 && !confirm('現在編集中の内容は破棄されます（保存していない場合）。読み込みますか？')) return;
+    if (dirty && !confirm('保存していない編集内容があります。破棄してバックアップを読み込みますか？')) return;
     setBusy(true, 'バックアップ読み込み中…');
     JSZip.loadAsync(f).then(function (zip) {
       var pj = zip.file('project.json');
@@ -823,6 +848,7 @@
           if (meta.author) authorInput.value = meta.author;
           currentProjectId = null;
           currentProjectName = '';
+          dirty = true; // 読み込み直後は未保存状態
           setProjStatus('📥 読み込みました（未保存）。「保存」で記録できます', true);
           render();
           setBusy(false, '');
